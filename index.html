@@ -90,14 +90,14 @@ input { font: inherit; padding: 12px 13px; border: 1px solid var(--line); border
 .team .nm { font-family: var(--font-display); font-weight: 700; font-size: clamp(16px, 4.6vw, 21px); line-height: 1.05; text-transform: uppercase; overflow-wrap: break-word; hyphens: auto; max-width: 100%; }
 .mid { font-family: var(--font-display); font-weight: 800; font-size: 40px; line-height: 1; text-align: center; min-width: 70px; }
 .mid small { display: block; font-size: 13px; font-weight: 600; color: var(--board-muted); letter-spacing: .06em; margin-top: 4px; }
-.picks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.pick { background: rgb(255 255 255 / .07); color: var(--board-ink); border: 2px solid transparent; border-radius: 12px; padding: 10px 6px 9px;
+.picks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.pick { background: rgb(255 255 255 / .07); color: var(--board-ink); border: 2px solid transparent; border-radius: 12px; padding: 14px 8px 12px;
   display: flex; flex-direction: column; align-items: center; gap: 1px; transition: background .15s, border-color .15s, transform .1s; }
 .pick:hover:not(:disabled) { background: rgb(255 255 255 / .13); }
 .pick:active:not(:disabled) { transform: scale(.97); }
-.pick .k { font-family: var(--font-display); font-weight: 800; font-size: 26px; line-height: 1; }
+.pick .k { font-family: var(--font-display); font-weight: 800; font-size: 22px; line-height: 1.05; text-transform: uppercase; text-align: center; overflow-wrap: break-word; max-width: 100%; }
 .pick .lbl { font-size: 11px; color: var(--board-muted); text-transform: uppercase; letter-spacing: .06em; }
-.pick .odd { font-family: var(--font-display); font-weight: 700; font-size: 18px; color: var(--gold); margin-top: 4px; }
+.pick .odd { font-family: var(--font-display); font-weight: 700; font-size: 22px; color: var(--gold); margin-top: 4px; }
 .pick .pts { font-size: 11px; color: var(--board-muted); }
 .pick[aria-pressed="true"] { border-color: var(--gold); background: rgb(227 165 20 / .16); }
 .pick:disabled { cursor: default; }
@@ -156,9 +156,9 @@ footer { text-align: center; font-size: 12px; color: var(--muted); }
   <!-- AUTH -->
   <div class="auth" id="authView" hidden>
     <h2>Um jogo por dia.<br>Um toque para apostar.</h2>
-    <p>Todos os dias escolhemos o jogo mais equilibrado entre Liga Portugal, Premier League e companhia. Tu escolhes 1, X ou 2 antes do apito inicial.</p>
+    <p>Todos os dias escolhemos o jogo mais equilibrado entre Liga Portugal, Premier League e companhia. Só tens duas opções: o favorito ganha, ou o outro ganha ou empata. Escolhes antes do apito inicial.</p>
     <div class="rules">
-      <div><b>1 · X · 2</b>Casa, empate ou fora</div>
+      <div><b>2 opções</b>Favorito ganha, ou não</div>
       <div><b>odd × 10</b>Pontos se acertares</div>
       <div><b>0</b>Se falhares, sem penalização</div>
     </div>
@@ -228,7 +228,14 @@ const TZ = "Europe/Lisbon";
 const fmtTime = (d) => new Intl.DateTimeFormat("pt-PT", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }).format(new Date(d));
 const fmtDay = (d) => new Intl.DateTimeFormat("pt-PT", { timeZone: TZ, weekday: "short", day: "numeric", month: "short" }).format(new Date(d));
 const lisbonDate = (d = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(d);
-const PICK_LBL = { "1": "Casa", "X": "Empate", "2": "Fora" };
+function opts(m) {
+  const favName = m.fav === "1" ? m.home : m.away, udName = m.fav === "1" ? m.away : m.home;
+  return {
+    F: { team: favName, what: "ganha", odd: Number(m.odd_fav), text: `${favName} ganha` },
+    U: { team: udName, what: "ganha ou empata", odd: Number(m.odd_ud), text: `${udName} ganha ou empata` },
+  };
+}
+const winner = (m) => m.result ? (m.result === m.fav ? "F" : "U") : null;
 
 let state = { user: null, profile: null, match: null, myBet: null, allBets: [], rankMode: "week", mode: "signup" };
 let tick = null;
@@ -334,7 +341,7 @@ async function loadRank() {
   }).join("") || `<tr><td colspan="4" class="sub">Ainda ninguém pontuou.</td></tr>`;
 }
 async function loadHist() {
-  const { data } = await sb.from("bets").select("pick,points,matches(home,away,match_date,kickoff,result,home_goals,away_goals,status)")
+  const { data } = await sb.from("bets").select("pick,points,matches(home,away,match_date,kickoff,result,home_goals,away_goals,status,fav,odd_fav,odd_ud)")
     .eq("user_id", state.user.id).order("created_at", { ascending: false }).limit(15);
   const items = (data || []).filter(b => b.matches);
   $("hist").innerHTML = items.length ? items.map(b => {
@@ -345,8 +352,8 @@ async function loadHist() {
     else r = new Date(m.kickoff) > new Date() ? "Aberta" : "Em jogo";
     const sc = m.status === "finished" ? ` · ${m.home_goals}–${m.away_goals}` : "";
     return `<li><span class="g">${esc(m.home)} – ${esc(m.away)}</span><span class="r ${cls} num">${r}</span>
-      <span class="d">${fmtDay(m.match_date + "T12:00:00Z")} · apostaste ${b.pick} (${PICK_LBL[b.pick]})${sc}</span></li>`;
-  }).join("") : `<li><span class="g sub">Ainda não apostaste. Escolhe 1, X ou 2 no jogo de hoje.</span></li>`;
+      <span class="d">${fmtDay(m.match_date + "T12:00:00Z")} · ${esc(opts(m)[b.pick]?.text || b.pick)}${sc}</span></li>`;
+  }).join("") : `<li><span class="g sub">Ainda não apostaste. Escolhe uma das duas opções no jogo de hoje.</span></li>`;
 }
 
 /* ---------- RENDER BOARD ---------- */
@@ -372,9 +379,9 @@ function renderBoard() {
   const ph = phase(m);
   const pill = { open: `<span class="pill open">Apostas abertas</span>`, live: `<span class="pill live">A decorrer</span>`,
                  done: `<span class="pill done">Terminado</span>`, void: `<span class="pill done">Anulado</span>` }[ph];
-  const odds = { "1": m.odd_home, "X": m.odd_draw, "2": m.odd_away };
+  const O = opts(m), win = winner(m);
   const total = state.allBets.length;
-  const cnt = { "1": 0, "X": 0, "2": 0 }; state.allBets.forEach(b => cnt[b.pick]++);
+  const cnt = { F: 0, U: 0 }; state.allBets.forEach(b => cnt[b.pick] = (cnt[b.pick] || 0) + 1);
   const showDist = ph !== "open" && total > 0;
   const mine = state.myBet?.pick;
   const mid = ph === "done" ? `${m.home_goals}<span style="opacity:.5">–</span>${m.away_goals}<small>Final</small>`
@@ -386,11 +393,11 @@ function renderBoard() {
       <div class="mid num">${mid}</div>
       <div class="team">${m.away_logo ? `<img src="${esc(m.away_logo)}" alt="">` : ""}<span class="nm">${esc(m.away)}</span></div>
     </div>
-    <div class="picks">${["1", "X", "2"].map(k => `
-      <button class="pick${m.result === k ? " result" : ""}" type="button" data-k="${k}" aria-pressed="${mine === k}" ${ph !== "open" ? "disabled" : ""}>
-        <span class="k">${k}</span><span class="lbl">${PICK_LBL[k]}</span>
-        <span class="odd num">${Number(odds[k]).toFixed(2)}</span>
-        <span class="pts num">${Math.round(odds[k] * 100) / 10} pts</span>
+    <div class="picks">${["F", "U"].map(k => `
+      <button class="pick${win === k ? " result" : ""}" type="button" data-k="${k}" aria-pressed="${mine === k}" ${ph !== "open" ? "disabled" : ""}>
+        <span class="k">${esc(O[k].team)}</span><span class="lbl">${O[k].what}</span>
+        <span class="odd num">${O[k].odd.toFixed(2)}</span>
+        <span class="pts num">${Math.round(O[k].odd * 100) / 10} pts</span>
         ${showDist ? `<span class="bar"><i style="width:${Math.round(cnt[k] / total * 100)}%"></i></span>` : ""}
       </button>`).join("")}</div>
     <div class="hint" id="hint" aria-live="polite"></div>`;
@@ -400,15 +407,15 @@ function renderBoard() {
 }
 function updateHint() {
   const m = state.match, h = $("hint"); if (!m || !h) return;
-  const ph = phase(m), mine = state.myBet?.pick;
+  const ph = phase(m), mine = state.myBet?.pick, mt = mine ? esc(opts(m)[mine]?.text || mine) : "";
   if (ph === "open") {
     const left = countdown(new Date(m.kickoff) - new Date());
-    h.innerHTML = mine ? `Apostaste <b>${mine}</b>. Podes mudar até ao apito · faltam ${left}`
+    h.innerHTML = mine ? `Apostaste: <b>${mt}</b>. Podes mudar até ao apito · faltam ${left}`
                        : `Toca numa opção para apostar · fecha em ${left}`;
-  } else if (ph === "live") h.innerHTML = mine ? `A tua aposta: <b>${mine} · ${PICK_LBL[mine]}</b>. Resultado depois do jogo.` : "Apostas fechadas. Amanhã há mais.";
+  } else if (ph === "live") h.innerHTML = mine ? `A tua aposta: <b>${mt}</b>. Resultado depois do jogo.` : "Apostas fechadas. Amanhã há mais.";
   else if (ph === "done") {
     const p = state.myBet?.points;
-    h.innerHTML = !mine ? "Não apostaste neste jogo." : p > 0 ? `Acertaste! <b>+${Number(p).toLocaleString("pt-PT")} pontos</b>` : `Desta vez não. Apostaste ${mine}.`;
+    h.innerHTML = !mine ? "Não apostaste neste jogo." : p > 0 ? `Acertaste! <b>+${Number(p).toLocaleString("pt-PT")} pontos</b>` : `Desta vez não. Apostaste: ${mt}.`;
   } else h.textContent = "Jogo adiado ou cancelado. As apostas não contam.";
 }
 function renderVoters(ph) {
@@ -421,7 +428,7 @@ function renderVoters(ph) {
   }
   card.hidden = total === 0;
   $("votersCount").textContent = `${total} ${total === 1 ? "aposta" : "apostas"}`;
-  $("voters").innerHTML = state.allBets.map(b => `<span><b>${b.pick}</b>${esc(b.profiles?.display_name || "?")}</span>`).join("");
+  $("voters").innerHTML = state.allBets.map(b => `<span><b>${esc(opts(state.match)[b.pick]?.team || "?")}${b.pick === "U" ? " ou empate" : ""}</b>${esc(b.profiles?.display_name || "?")}</span>`).join("");
 }
 
 async function placeBet(k) {
