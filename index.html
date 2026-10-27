@@ -393,7 +393,7 @@ function renderBoard() {
       <div class="mid num">${mid}</div>
       <div class="team">${m.away_logo ? `<img src="${esc(m.away_logo)}" alt="">` : ""}<span class="nm">${esc(m.away)}</span></div>
     </div>
-    <div class="picks">${["F", "U"].map(k => `
+    <div class="picks">${(m.fav === "1" ? ["F", "U"] : ["U", "F"]).map(k => `
       <button class="pick${win === k ? " result" : ""}" type="button" data-k="${k}" aria-pressed="${mine === k}" ${ph !== "open" ? "disabled" : ""}>
         <span class="k">${esc(O[k].team)}</span><span class="lbl">${O[k].what}</span>
         <span class="odd num">${O[k].odd.toFixed(2)}</span>
