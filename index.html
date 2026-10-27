@@ -128,6 +128,10 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: v
 th:nth-child(2) { text-align: left; }
 td { padding: 9px 6px; border-top: 1px solid var(--line); text-align: right; }
 td.pos { width: 30px; text-align: center; font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--muted); }
+.bet-ok { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--win); color: #fff; font-size: 11px; font-weight: 700; margin-right: 7px; vertical-align: 1px; }
+.bet-no { display: inline-block; width: 17px; height: 17px; border-radius: 50%; border: 1.5px dashed var(--line); margin-right: 7px; vertical-align: -3px; }
+.legend { font-size: 12px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.legend .bet-ok, .legend .bet-no { margin: 0 5px 0 0; }
 td.nm { text-align: left; font-weight: 600; max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; }
 td.pt { font-family: var(--font-display); font-weight: 700; font-size: 18px; }
 tr.me td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
@@ -211,6 +215,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); }
         <thead><tr><th></th><th>Jogador</th><th>Acertos</th><th>Pontos</th></tr></thead>
         <tbody id="rank"></tbody>
       </table></div>
+      <div class="legend" id="rankLegend" hidden><span><span class="bet-ok">✓</span>Já apostou hoje</span><span><span class="bet-no"></span>Ainda não apostou</span></div>
     </section>
     <section class="card">
       <div class="sec-h"><h2>As tuas apostas</h2></div>
@@ -248,7 +253,7 @@ function formHtml(f) {
 }
 const winner = (m) => m.result ? (m.result === m.fav ? "F" : "U") : null;
 
-let state = { user: null, profile: null, match: null, myBet: null, allBets: [], rankMode: "week", mode: "signup" };
+let state = { user: null, profile: null, match: null, myBet: null, allBets: [], bettors: new Set(), rankMode: "week", mode: "signup" };
 let tick = null;
 
 function show(view) {
@@ -321,11 +326,13 @@ async function loadProfile() {
 async function loadMatch() {
   const { data } = await sb.from("matches").select("*").eq("match_date", lisbonDate()).maybeSingle();
   state.match = data;
-  state.myBet = null; state.allBets = [];
+  state.myBet = null; state.allBets = []; state.bettors = new Set();
   if (data) {
     const { data: bets } = await sb.from("bets").select("pick,user_id,points,profiles(display_name)").eq("match_id", data.id);
     state.allBets = bets || [];
     state.myBet = state.allBets.find(b => b.user_id === state.user.id) || null;
+    const { data: ids } = await sb.rpc("bettors", { p_match_id: data.id });
+    state.bettors = new Set((ids || []).map(x => typeof x === "string" ? x : x.bettors));
   }
 }
 function sinceFor(mode) {
@@ -341,13 +348,14 @@ async function loadRank() {
   const { data, error } = await sb.rpc("leaderboard", { since: sinceFor(state.rankMode) });
   const tb = $("rank");
   if (error) { tb.innerHTML = `<tr><td colspan="4" class="sub">Não foi possível carregar a classificação.</td></tr>`; return; }
+  $("rankLegend").hidden = !state.match;
   let pos = 0, prev = null;
   tb.innerHTML = (data || []).map((r, i) => {
     const p = Number(r.points);
     if (p !== prev) { pos = i + 1; prev = p; }
     const me = r.user_id === state.user.id;
     return `<tr class="${me ? "me" : ""} ${pos === 1 && p > 0 ? "p1" : ""}">
-      <td class="pos">${pos}</td><td class="nm">${esc(r.display_name)}${me ? ' <span class="sub">(tu)</span>' : ""}</td>
+      <td class="pos">${pos}</td><td class="nm">${!state.match ? "" : state.bettors.has(r.user_id) ? '<span class="bet-ok" title="Já apostou hoje" aria-label="Já apostou hoje">✓</span>' : '<span class="bet-no" title="Ainda não apostou hoje" aria-label="Ainda não apostou hoje"></span>'}${esc(r.display_name)}${me ? ' <span class="sub">(tu)</span>' : ""}</td>
       <td>${r.wins}/${r.bets}</td><td class="pt">${p.toLocaleString("pt-PT", { maximumFractionDigits: 1 })}</td></tr>`;
   }).join("") || `<tr><td colspan="4" class="sub">Ainda ninguém pontuou.</td></tr>`;
 }
@@ -455,7 +463,7 @@ async function placeBet(k) {
   if (error) {
     await loadMatch(); renderBoard();
     const h = $("hint"); if (h) h.textContent = new Date(m.kickoff) <= new Date() ? "O jogo já começou, as apostas fecharam." : "Não foi possível guardar. Tenta outra vez.";
-  } else loadHist();
+  } else { state.bettors.add(state.user.id); loadHist(); loadRank(); }
 }
 
 async function adminPick() {
