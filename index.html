@@ -1,4 +1,6 @@
 <!doctype html><html lang="pt-PT"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Fantasy DITPorto</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="Um jogo por dia, uma aposta por pessoa. A liga de apostas da equipa DIT Porto.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -46,8 +48,7 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 
 header.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .brand { display: flex; align-items: center; gap: 10px; }
-.crest { width: 36px; height: 36px; border-radius: 9px; background: var(--board); color: var(--gold);
-  display: grid; place-items: center; font-family: var(--font-display); font-weight: 800; font-size: 17px; letter-spacing: -.02em; }
+.crest { width: 48px; height: 48px; display: block; }
 .brand h1 { font-size: 24px; line-height: 1; text-transform: uppercase; }
 .brand h1 span { color: var(--accent); }
 .who { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); min-width: 0; }
@@ -156,7 +157,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); }
 
 <div class="wrap">
   <header class="top">
-    <div class="brand"><div class="crest" aria-hidden="true">DP</div><h1>Fantasy <span>DITPorto</span></h1></div>
+    <div class="brand"><img class="crest" src="logo.png" alt="" width="48" height="48"><h1>Fantasy <span>DITPorto</span></h1></div>
     <div class="who" id="who" hidden><b id="whoName"></b><button class="link" id="logout" type="button">Sair</button></div>
   </header>
 
