@@ -88,6 +88,11 @@ input { font: inherit; padding: 12px 13px; border: 1px solid var(--line); border
 .team { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; min-width: 0; }
 .team img { width: 56px; height: 56px; object-fit: contain; }
 .team .nm { font-family: var(--font-display); font-weight: 700; font-size: clamp(16px, 4.6vw, 21px); line-height: 1.05; text-transform: uppercase; overflow-wrap: break-word; hyphens: auto; max-width: 100%; }
+.form { display: flex; gap: 3px; justify-content: center; }
+.form i { width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; font-style: normal;
+  font-family: var(--font-display); font-weight: 700; font-size: 12px; line-height: 1; color: #fff; }
+.form i.W { background: #1f9d5c; } .form i.D { background: #6b778a; } .form i.L { background: #c94343; }
+.form i:last-child { outline: 2px solid rgb(255 255 255 / .55); outline-offset: 1px; }
 .mid { font-family: var(--font-display); font-weight: 800; font-size: 40px; line-height: 1; text-align: center; min-width: 70px; }
 .mid small { display: block; font-size: 13px; font-weight: 600; color: var(--board-muted); letter-spacing: .06em; margin-top: 4px; }
 .picks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
@@ -234,6 +239,12 @@ function opts(m) {
     F: { team: favName, what: "ganha", odd: Number(m.odd_fav), text: `${favName} ganha` },
     U: { team: udName, what: "ganha ou empata", odd: Number(m.odd_ud), text: `${udName} ganha ou empata` },
   };
+}
+const FORM_PT = { W: ["V", "Vitória"], D: ["E", "Empate"], L: ["D", "Derrota"] };
+function formHtml(f) {
+  if (!f) return "";
+  const cells = [...f].filter(c => FORM_PT[c]).map(c => `<i class="${c}" title="${FORM_PT[c][1]}">${FORM_PT[c][0]}</i>`).join("");
+  return cells ? `<span class="form" aria-label="Últimos jogos no campeonato, do mais antigo para o mais recente">${cells}</span>` : "";
 }
 const winner = (m) => m.result ? (m.result === m.fav ? "F" : "U") : null;
 
@@ -389,9 +400,9 @@ function renderBoard() {
   el.innerHTML = `
     <div class="meta"><span class="lg">${m.league_logo ? `<img src="${esc(m.league_logo)}" alt="">` : ""}<span>${esc(m.league)}</span></span>${pill}</div>
     <div class="teams">
-      <div class="team">${m.home_logo ? `<img src="${esc(m.home_logo)}" alt="">` : ""}<span class="nm">${esc(m.home)}</span></div>
+      <div class="team">${m.home_logo ? `<img src="${esc(m.home_logo)}" alt="">` : ""}<span class="nm">${esc(m.home)}</span>${formHtml(m.home_form)}</div>
       <div class="mid num">${mid}</div>
-      <div class="team">${m.away_logo ? `<img src="${esc(m.away_logo)}" alt="">` : ""}<span class="nm">${esc(m.away)}</span></div>
+      <div class="team">${m.away_logo ? `<img src="${esc(m.away_logo)}" alt="">` : ""}<span class="nm">${esc(m.away)}</span>${formHtml(m.away_form)}</div>
     </div>
     <div class="picks">${(m.fav === "1" ? ["F", "U"] : ["U", "F"]).map(k => `
       <button class="pick${win === k ? " result" : ""}" type="button" data-k="${k}" aria-pressed="${mine === k}" ${ph !== "open" ? "disabled" : ""}>
