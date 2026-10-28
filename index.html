@@ -115,6 +115,38 @@ input { font: inherit; padding: 12px 13px; border: 1px solid var(--line); border
 .empty { text-align: center; padding: 22px 8px; display: flex; flex-direction: column; gap: 10px; align-items: center; }
 .empty h2 { font-size: 26px; text-transform: uppercase; }
 .empty p { margin: 0; color: var(--board-muted); max-width: 36ch; }
+.deck-nav { display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; gap: 8px; margin: -4px -4px 0; }
+.arrow { width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgb(255 255 255 / .18); background: rgb(255 255 255 / .06);
+  color: var(--board-ink); font-size: 26px; line-height: 1; display: grid; place-items: center; padding: 0 0 3px; }
+.arrow:hover:not(:disabled) { background: rgb(255 255 255 / .14); }
+.arrow:disabled { opacity: .25; cursor: default; }
+.deck-title { text-align: center; display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.deck-title b { font-family: var(--font-display); font-size: 22px; text-transform: uppercase; letter-spacing: .03em; }
+.deck-title span { font-size: 12px; color: var(--board-muted); }
+.slide { display: flex; flex-direction: column; gap: 16px; }
+.dots { display: flex; justify-content: center; gap: 6px; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: rgb(255 255 255 / .2); }
+.dots i.on { background: var(--gold); width: 18px; border-radius: 3px; }
+.vote-intro { margin: 0; font-size: 13px; color: var(--board-muted); text-align: center; }
+.vote-intro b { color: var(--board-ink); }
+.vlist { display: flex; flex-direction: column; gap: 8px; }
+.vopt { position: relative; overflow: hidden; text-align: left; background: rgb(255 255 255 / .06); color: var(--board-ink);
+  border: 2px solid transparent; border-radius: 12px; padding: 10px 12px; display: grid; gap: 4px; }
+.vopt:hover { background: rgb(255 255 255 / .11); }
+.vopt.on { border-color: var(--gold); }
+.vopt > span:not(.vbar) { position: relative; }
+.vbar { position: absolute; inset: 0 auto 0 0; background: rgb(227 165 20 / .12); transition: width .3s; }
+.vtop { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--board-muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.vlg { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.vlg img { width: 16px; height: 16px; object-fit: contain; background: #fff; border-radius: 3px; padding: 1px; }
+.vlg em { font-style: normal; background: #1f9d5c; color: #fff; border-radius: 3px; padding: 0 4px; letter-spacing: .04em; }
+.vteams { display: flex; align-items: center; gap: 7px; font-family: var(--font-display); font-size: 19px; text-transform: uppercase; min-width: 0; flex-wrap: wrap; }
+.vteams img { width: 22px; height: 22px; object-fit: contain; }
+.vteams .vs { color: var(--board-muted); }
+.vodds { font-size: 12px; color: var(--gold); }
+.vcount { font-size: 12px; color: var(--board-muted); min-height: 0; }
+.vcount:empty { display: none; }
+.voters span.won { background: color-mix(in srgb, var(--win) 14%, transparent); }
 .ghost { background: transparent; border: 1px solid rgb(255 255 255 / .25); color: var(--board-ink); border-radius: 10px; padding: 9px 14px; font-weight: 600; }
 
 /* Sections */
@@ -200,7 +232,7 @@ footer { text-align: center; font-size: 12px; color: var(--muted); }
   <div id="appView" hidden style="display:flex;flex-direction:column;gap:20px">
     <div class="board" id="board"></div>
     <section class="card" id="votersCard" hidden>
-      <div class="sec-h"><h2>Apostas de hoje</h2><span class="sub" id="votersCount"></span></div>
+      <div class="sec-h"><h2 id="votersTitle">Apostas de hoje</h2><span class="sub" id="votersCount"></span></div>
       <div class="voters" id="voters"></div>
     </section>
     <section class="card">
@@ -254,7 +286,7 @@ function formHtml(f) {
 }
 const winner = (m) => m.result ? (m.result === m.fav ? "F" : "U") : null;
 
-let state = { user: null, profile: null, match: null, myBet: null, allBets: [], bettors: new Set(), rankMode: "week", mode: "signup" };
+let state = { user: null, profile: null, match: null, myBet: null, allBets: [], bettors: new Set(), slide: { kind: "today" }, last: null, cands: {}, votes: {}, rankMode: "week", mode: "signup" };
 let tick = null;
 
 function show(view) {
@@ -386,26 +418,111 @@ function countdown(ms) {
   const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), mi = Math.floor(s % 3600 / 60);
   return h ? `${h}h ${String(mi).padStart(2, "0")}m` : `${mi} min`;
 }
+/* ---------- DECK: last game · today · next 2 days ---------- */
+const DAY_FMT = new Intl.DateTimeFormat("pt-PT", { timeZone: "UTC", weekday: "long", day: "numeric", month: "short" });
+const dayName = (iso) => DAY_FMT.format(new Date(iso + "T12:00:00Z"));
+const addDays = (iso, n) => { const d = new Date(iso + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+function slides() {
+  const t = lisbonDate(), s = [];
+  if (state.last) s.push({ kind: "last", label: "Último jogo", sub: dayName(state.last.match.match_date) });
+  s.push({ kind: "today", label: "Hoje", sub: dayName(t) });
+  s.push({ kind: "vote", date: addDays(t, 1), label: "Amanhã", sub: dayName(addDays(t, 1)) });
+  return s;
+}
+const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
+
+async function loadDeck() {
+  const t = lisbonDate();
+  const { data: last } = await sb.from("matches").select("*").lt("match_date", t).eq("status", "finished")
+    .order("match_date", { ascending: false }).limit(1).maybeSingle();
+  state.last = null;
+  if (last) {
+    const { data: bets } = await sb.from("bets").select("pick,user_id,points,profiles(display_name)").eq("match_id", last.id);
+    state.last = { match: last, bets: bets || [], mine: (bets || []).find(b => b.user_id === state.user.id) || null };
+  }
+  const dates = [addDays(t, 1)];
+  const [{ data: cands }, { data: votes }] = await Promise.all([
+    sb.from("candidates").select("*").in("match_date", dates).order("rank"),
+    sb.from("votes").select("match_date,user_id,fixture_id").in("match_date", dates),
+  ]);
+  state.cands = {}; state.votes = {};
+  for (const d of dates) {
+    state.cands[d] = (cands || []).filter(c => c.match_date === d);
+    const vs = (votes || []).filter(v => v.match_date === d);
+    const counts = {}; vs.forEach(v => counts[v.fixture_id] = (counts[v.fixture_id] || 0) + 1);
+    state.votes[d] = { counts, total: vs.length, mine: vs.find(v => v.user_id === state.user.id)?.fixture_id ?? null };
+  }
+}
+
 function renderBoard() {
-  const m = state.match, el = $("board");
+  const el = $("board"), list = slides();
+  let i = list.findIndex(s => s.kind === state.slide.kind && (s.date || null) === (state.slide.date || null));
+  if (i < 0) { i = list.findIndex(s => s.kind === "today"); state.slide = list[i]; }
+  const cur = list[i];
+  el.innerHTML = `
+    <div class="deck-nav">
+      <button class="arrow" type="button" id="prevSlide" aria-label="Anterior" ${i === 0 ? "disabled" : ""}>‹</button>
+      <div class="deck-title"><b>${esc(cur.label)}</b><span>${esc(cur.sub)}</span></div>
+      <button class="arrow" type="button" id="nextSlide" aria-label="Seguinte" ${i === list.length - 1 ? "disabled" : ""}>›</button>
+    </div>
+    <div class="slide" id="slide"></div>
+    <div class="dots" aria-hidden="true">${list.map((s, j) => `<i class="${j === i ? "on" : ""}"></i>`).join("")}</div>`;
+  $("prevSlide").onclick = () => go(-1);
+  $("nextSlide").onclick = () => go(1);
+  const body = $("slide");
+  if (cur.kind === "today") renderToday(body);
+  else if (cur.kind === "last") renderMatch(body, state.last.match, state.last.bets, state.last.mine);
+  else renderVote(body, cur.date);
+  $("votersCard").hidden = true;
+  if (cur.kind === "today" && state.match) renderVoters(phase(state.match), state.match, state.allBets);
+  if (cur.kind === "last") renderVoters("done", state.last.match, state.last.bets);
+}
+function go(d) {
+  const list = slides();
+  const i = list.findIndex(s => s.kind === state.slide.kind && (s.date || null) === (state.slide.date || null));
+  const j = Math.min(list.length - 1, Math.max(0, i + d));
+  if (j === i) return;
+  state.slide = list[j]; renderBoard();
+}
+document.addEventListener("keydown", (e) => {
+  if ($("appView").hidden || /INPUT|TEXTAREA/.test(document.activeElement?.tagName || "")) return;
+  if (e.key === "ArrowLeft") go(-1); else if (e.key === "ArrowRight") go(1);
+});
+(() => {
+  let x0 = null, y0 = null;
+  const b = $("board");
+  b.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+  b.addEventListener("touchend", (e) => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) go(dx < 0 ? 1 : -1);
+    x0 = null;
+  }, { passive: true });
+})();
+
+function renderToday(el) {
+  const m = state.match;
   if (!m) {
     el.innerHTML = `<div class="empty"><h2>Sem jogo hoje</h2>
       <p>O jogo do dia é escolhido automaticamente de manhã. Hoje não houve nenhum jogo com odds equilibradas nas ligas que seguimos.</p>
       ${state.profile?.is_admin ? `<button class="ghost" id="pickNow" type="button">Procurar jogo agora</button><span class="hint" id="pickMsg"></span>` : ""}</div>`;
     const b = $("pickNow"); if (b) b.onclick = adminPick;
-    $("votersCard").hidden = true;
     return;
   }
+  renderMatch(el, m, state.allBets, state.myBet, true);
+}
+
+function renderMatch(el, m, bets, myBet, isToday = false) {
   const ph = phase(m);
   const pill = { open: `<span class="pill open">Apostas abertas</span>`, live: `<span class="pill live">A decorrer</span>`,
                  done: `<span class="pill done">Terminado</span>`, void: `<span class="pill done">Anulado</span>` }[ph];
   const O = opts(m), win = winner(m);
-  const total = state.allBets.length;
-  const cnt = { F: 0, U: 0 }; state.allBets.forEach(b => cnt[b.pick] = (cnt[b.pick] || 0) + 1);
+  const total = bets.length;
+  const cnt = { F: 0, U: 0 }; bets.forEach(b => cnt[b.pick] = (cnt[b.pick] || 0) + 1);
   const showDist = ph !== "open" && total > 0;
-  const mine = state.myBet?.pick;
+  const mine = myBet?.pick;
   const mid = ph === "done" ? `${m.home_goals}<span style="opacity:.5">–</span>${m.away_goals}<small>Final</small>`
-            : `${fmtTime(m.kickoff)}<small>${ph === "open" ? "Hoje" : "Ao vivo"}</small>`;
+            : `${fmtTime(m.kickoff)}<small>${ph === "open" ? (isToday ? "Hoje" : "") : "Ao vivo"}</small>`;
   el.innerHTML = `
     <div class="meta"><span class="lg">${m.league_logo ? `<img src="${esc(m.league_logo)}" alt="">` : ""}<span>${esc(m.league)}</span></span>${pill}</div>
     <div class="teams">
@@ -414,32 +531,72 @@ function renderBoard() {
       <div class="team">${m.away_logo ? `<img src="${esc(m.away_logo)}" alt="">` : ""}<span class="nm">${esc(m.away)}</span>${formHtml(m.away_form)}</div>
     </div>
     <div class="picks">${(m.fav === "1" ? ["F", "U"] : ["U", "F"]).map(k => `
-      <button class="pick${win === k ? " result" : ""}" type="button" data-k="${k}" aria-pressed="${mine === k}" ${ph !== "open" ? "disabled" : ""}>
+      <button class="pick${win === k ? " result" : ""}" type="button" data-k="${k}" aria-pressed="${mine === k}" ${ph !== "open" || !isToday ? "disabled" : ""}>
         <span class="k">${esc(O[k].team)}</span><span class="lbl">${O[k].what}</span>
         <span class="odd num">${O[k].odd.toFixed(2)}</span>
         <span class="pts num">${Math.round(O[k].odd * 100) / 10} pts</span>
         ${showDist ? `<span class="bar"><i style="width:${Math.round(cnt[k] / total * 100)}%"></i></span>` : ""}
       </button>`).join("")}</div>
-    <div class="hint" id="hint" aria-live="polite"></div>`;
-  el.querySelectorAll(".pick").forEach(b => b.onclick = () => placeBet(b.dataset.k));
-  updateHint();
-  renderVoters(ph);
+    <div class="hint" id="hint" aria-live="polite">${hintHtml(m, myBet)}</div>`;
+  if (isToday) el.querySelectorAll(".pick").forEach(b => b.onclick = () => placeBet(b.dataset.k));
 }
-function updateHint() {
-  const m = state.match, h = $("hint"); if (!m || !h) return;
-  const ph = phase(m), mine = state.myBet?.pick, mt = mine ? esc(opts(m)[mine]?.text || mine) : "";
+function hintHtml(m, myBet) {
+  const ph = phase(m), mine = myBet?.pick, mt = mine ? esc(opts(m)[mine]?.text || mine) : "";
   if (ph === "open") {
     const left = countdown(new Date(m.kickoff) - new Date());
-    h.innerHTML = mine ? `Apostaste: <b>${mt}</b>. Podes mudar até ao apito · faltam ${left}`
-                       : `Toca numa opção para apostar · fecha em ${left}`;
-  } else if (ph === "live") h.innerHTML = mine ? `A tua aposta: <b>${mt}</b>. Resultado depois do jogo.` : "Apostas fechadas. Amanhã há mais.";
-  else if (ph === "done") {
-    const p = state.myBet?.points;
-    h.innerHTML = !mine ? "Não apostaste neste jogo." : p > 0 ? `Acertaste! <b>+${Number(p).toLocaleString("pt-PT")} pontos</b>` : `Desta vez não. Apostaste: ${mt}.`;
-  } else h.textContent = "Jogo adiado ou cancelado. As apostas não contam.";
+    return mine ? `Apostaste: <b>${mt}</b>. Podes mudar até ao apito · faltam ${left}` : `Toca numa opção para apostar · fecha em ${left}`;
+  }
+  if (ph === "live") return mine ? `A tua aposta: <b>${mt}</b>. Resultado depois do jogo.` : "Apostas fechadas. Amanhã há mais.";
+  if (ph === "done") {
+    const p = myBet?.points;
+    return !mine ? "Não apostaste neste jogo." : p > 0 ? `Acertaste! <b>+${Number(p).toLocaleString("pt-PT")} pontos</b>` : `Desta vez não. Apostaste: ${mt}.`;
+  }
+  return "Jogo adiado ou cancelado. As apostas não contam.";
 }
-function renderVoters(ph) {
-  const card = $("votersCard"), total = state.allBets.length;
+function updateHint() {
+  const h = $("hint");
+  if (h && state.slide.kind === "today" && state.match) h.innerHTML = hintHtml(state.match, state.myBet);
+}
+
+function renderVote(el, date) {
+  const list = state.cands?.[date] || [], v = state.votes?.[date] || { counts: {}, total: 0, mine: null };
+  const day = dayName(date).split(",")[0];
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><h2>Lista a caminho</h2><p>Os jogos de ${esc(day)} aparecem aqui todas as manhãs, com prioridade para a Liga Portugal. Se não houver jogos nas ligas que seguimos, o jogo do dia é escolhido automaticamente.</p></div>`;
+    return;
+  }
+  el.innerHTML = `
+    <p class="vote-intro">Escolhe o jogo de <b>${esc(day)}</b>. O mais votado passa a ser o jogo do dia, e a votação fecha às 6h desse dia.</p>
+    <div class="vlist" role="list">${list.map(c => {
+      const n = v.counts[c.fixture_id] || 0, mine = v.mine === c.fixture_id;
+      const pct = v.total ? Math.round(n / v.total * 100) : 0;
+      const pt = c.league_id === 94 || c.league_id === 95 || c.league_id === 96 || c.league_id === 97;
+      return `<button class="vopt${mine ? " on" : ""}" type="button" role="listitem" data-f="${c.fixture_id}" aria-pressed="${mine}">
+        <span class="vbar" style="width:${pct}%"></span>
+        <span class="vtop"><span class="vlg">${c.league_logo ? `<img src="${esc(c.league_logo)}" alt="">` : ""}${esc(c.league)}${pt ? ' <em>PT</em>' : ""}</span><span class="num">${fmtTime(c.kickoff)}</span></span>
+        <span class="vteams">${c.home_logo ? `<img src="${esc(c.home_logo)}" alt="">` : ""}<b>${esc(c.home)}</b><span class="vs">–</span><b>${esc(c.away)}</b>${c.away_logo ? `<img src="${esc(c.away_logo)}" alt="">` : ""}</span>
+        <span class="vodds num">${esc(c.fav === "1" ? c.home : c.away)} ganha ${Number(c.odd_fav).toFixed(2)} · ${esc(c.fav === "1" ? c.away : c.home)} ou empate ${Number(c.odd_ud).toFixed(2)}</span>
+        <span class="vcount num">${n ? `${n} ${n === 1 ? "voto" : "votos"}` : ""}${mine ? " · o teu" : ""}</span>
+      </button>`; }).join("")}</div>
+    <div class="hint" id="voteMsg" aria-live="polite">${v.total ? `${v.total} ${v.total === 1 ? "voto" : "votos"} até agora` : "Ainda ninguém votou"}</div>`;
+  el.querySelectorAll(".vopt").forEach(b => b.onclick = () => castVote(date, Number(b.dataset.f)));
+}
+async function castVote(date, fid) {
+  const v = state.votes[date], prev = v.mine;
+  if (prev === fid) return;
+  if (prev) v.counts[prev]--; else v.total++;
+  v.counts[fid] = (v.counts[fid] || 0) + 1; v.mine = fid;
+  renderBoard();
+  const { error } = prev
+    ? await sb.from("votes").update({ fixture_id: fid }).eq("match_date", date).eq("user_id", state.user.id)
+    : await sb.from("votes").insert({ match_date: date, fixture_id: fid });
+  if (error) { await loadDeck(); renderBoard(); const m = $("voteMsg"); if (m) m.textContent = "Não foi possível guardar o voto. Tenta outra vez."; }
+}
+
+function renderVoters(ph, m, bets) {
+  const card = $("votersCard"), total = bets.length;
+  const isToday = m === state.match;
+  $("votersTitle").textContent = isToday ? "Apostas de hoje" : "Apostas do último jogo";
   if (ph === "open") {
     card.hidden = total === 0;
     $("votersCount").textContent = "";
@@ -448,7 +605,7 @@ function renderVoters(ph) {
   }
   card.hidden = total === 0;
   $("votersCount").textContent = `${total} ${total === 1 ? "aposta" : "apostas"}`;
-  $("voters").innerHTML = state.allBets.map(b => `<span><b>${esc(opts(state.match)[b.pick]?.team || "?")}${b.pick === "U" ? " ou empate" : ""}</b>${esc(b.profiles?.display_name || "?")}</span>`).join("");
+  $("voters").innerHTML = bets.map(b => `<span${b.points > 0 ? ' class="won"' : ""}><b>${esc(opts(m)[b.pick]?.team || "?")}${b.pick === "U" ? " ou empate" : ""}</b>${esc(b.profiles?.display_name || "?")}${b.points > 0 ? ` +${Number(b.points).toLocaleString("pt-PT")}` : ""}</span>`).join("");
 }
 
 async function placeBet(k) {
@@ -491,12 +648,12 @@ async function start() {
   if (!session) { state.user = null; show("auth"); return; }
   state.user = session.user;
   await loadProfile();
-  await loadMatch();
+  await Promise.all([loadMatch(), loadDeck()]);
   show("app");
   renderBoard(); loadRank(); loadHist();
   clearInterval(tick);
   tick = setInterval(() => {
-    if (!state.match) return;
+    if (!state.match || state.slide.kind !== "today") return;
     const before = $("board").querySelector(".pick:not(:disabled)") !== null;
     if (before && phase(state.match) !== "open") { loadMatch().then(renderBoard); }
     else updateHint();
@@ -510,7 +667,7 @@ sb.auth.onAuthStateChange((ev, session) => {
   started = true;
   setTimeout(start, 0);
 });
-document.addEventListener("visibilitychange", () => { if (!document.hidden && state.user) loadMatch().then(() => { renderBoard(); loadRank(); }); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && state.user) Promise.all([loadMatch(), loadDeck()]).then(() => { renderBoard(); loadRank(); }); });
 setMode("signup");
 </script>
 
