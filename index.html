@@ -286,7 +286,7 @@ function formHtml(f) {
 }
 const winner = (m) => m.result ? (m.result === m.fav ? "F" : "U") : null;
 
-let state = { user: null, profile: null, match: null, myBet: null, allBets: [], bettors: new Set(), slide: { kind: "today" }, last: null, cands: {}, votes: {}, rankMode: "week", mode: "signup" };
+let state = { user: null, profile: null, match: null, myBet: null, allBets: [], bettors: new Set(), slide: { kind: "today" }, last: null, cands: {}, votes: {}, ahead: {}, rankMode: "week", mode: "signup" };
 let tick = null;
 
 function show(view) {
@@ -426,13 +426,19 @@ function slides() {
   const t = lisbonDate(), s = [];
   if (state.last) s.push({ kind: "last", label: "Último jogo", sub: dayName(state.last.match.match_date) });
   s.push({ kind: "today", label: "Hoje", sub: dayName(t) });
-  for (let i = 1; i <= VOTE_DAYS; i++) {
+  const label = (i, d) => i === 1 ? "Amanhã" : cap(dayName(d).split(",")[0]);
+  for (let i = 1; i <= BET_DAYS; i++) {
     const d = addDays(t, i);
-    s.push({ kind: "vote", date: d, label: i === 1 ? "Amanhã" : cap(dayName(d).split(",")[0]), sub: dayName(d) });
+    s.push({ kind: "game", date: d, label: label(i, d), sub: dayName(d) });
+  }
+  for (let i = VOTE_FROM; i < VOTE_FROM + VOTE_DAYS; i++) {
+    const d = addDays(t, i);
+    s.push({ kind: "vote", date: d, label: "Votar · " + label(i, d).replace("-feira", ""), sub: dayName(d) });
   }
   return s;
 }
-const VOTE_DAYS = 3;
+// Game for day D is chosen 3 days before (votes close then); bets open as soon as it is chosen.
+const BET_DAYS = 3, VOTE_FROM = BET_DAYS + 1, VOTE_DAYS = 3;
 const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
 
 async function loadDeck() {
@@ -444,7 +450,17 @@ async function loadDeck() {
     const { data: bets } = await sb.from("bets").select("pick,user_id,points,profiles(display_name)").eq("match_id", last.id);
     state.last = { match: last, bets: bets || [], mine: (bets || []).find(b => b.user_id === state.user.id) || null };
   }
-  const dates = Array.from({ length: VOTE_DAYS }, (_, i) => addDays(t, i + 1));
+  const dates = Array.from({ length: VOTE_DAYS }, (_, i) => addDays(t, VOTE_FROM + i));
+  const aheadDates = Array.from({ length: BET_DAYS }, (_, i) => addDays(t, i + 1));
+  const { data: ahead } = await sb.from("matches").select("*").in("match_date", aheadDates);
+  const ids = (ahead || []).map(m => m.id);
+  const { data: abets } = ids.length ? await sb.from("bets").select("match_id,pick,user_id,points,profiles(display_name)").in("match_id", ids) : { data: [] };
+  state.ahead = {};
+  for (const d of aheadDates) {
+    const m = (ahead || []).find(x => x.match_date === d) || null;
+    const bets = m ? (abets || []).filter(b => b.match_id === m.id) : [];
+    state.ahead[d] = { match: m, bets, mine: bets.find(b => b.user_id === state.user.id) || null };
+  }
   const [{ data: cands }, { data: votes }] = await Promise.all([
     sb.from("candidates").select("*").in("match_date", dates).order("rank"),
     sb.from("votes").select("match_date,user_id,ext_key").in("match_date", dates),
@@ -476,10 +492,12 @@ function renderBoard() {
   const body = $("slide");
   if (cur.kind === "today") renderToday(body);
   else if (cur.kind === "last") renderMatch(body, state.last.match, state.last.bets, state.last.mine);
+  else if (cur.kind === "game") renderGame(body, cur.date);
   else renderVote(body, cur.date);
   $("votersCard").hidden = true;
   if (cur.kind === "today" && state.match) renderVoters(phase(state.match), state.match, state.allBets);
   if (cur.kind === "last") renderVoters("done", state.last.match, state.last.bets);
+  if (cur.kind === "game" && state.ahead[cur.date]?.match) { const e = state.ahead[cur.date]; renderVoters(phase(e.match), e.match, e.bets); }
 }
 function go(d) {
   const list = slides();
@@ -515,8 +533,17 @@ function renderToday(el) {
   }
   renderMatch(el, m, state.allBets, state.myBet, true);
 }
+function renderGame(el, date) {
+  const e = state.ahead[date];
+  if (!e?.match) {
+    el.innerHTML = `<div class="empty"><h2>Jogo por escolher</h2><p>O jogo de ${esc(dayName(date).split(",")[0])} é escolhido às 6h de ${esc(dayName(addDays(date, -BET_DAYS)).split(",")[0])}, com base nos votos.</p></div>`;
+    return;
+  }
+  renderMatch(el, e.match, e.bets, e.mine, true, date);
+}
 
-function renderMatch(el, m, bets, myBet, isToday = false) {
+function renderMatch(el, m, bets, myBet, bettable = false, date = null) {
+  const isToday = bettable && !date;
   const ph = phase(m);
   const pill = { open: `<span class="pill open">Apostas abertas</span>`, live: `<span class="pill live">A decorrer</span>`,
                  done: `<span class="pill done">Terminado</span>`, void: `<span class="pill done">Anulado</span>` }[ph];
@@ -526,7 +553,7 @@ function renderMatch(el, m, bets, myBet, isToday = false) {
   const showDist = ph !== "open" && total > 0;
   const mine = myBet?.pick;
   const mid = ph === "done" ? `${m.home_goals}<span style="opacity:.5">–</span>${m.away_goals}<small>Final</small>`
-            : `${fmtTime(m.kickoff)}<small>${ph === "open" ? (isToday ? "Hoje" : "") : "Ao vivo"}</small>`;
+            : `${fmtTime(m.kickoff)}<small>${ph === "open" ? (isToday ? "Hoje" : date ? cap(dayName(date).split(",")[0].replace("-feira", "")) : "") : "Ao vivo"}</small>`;
   el.innerHTML = `
     <div class="meta"><span class="lg">${m.league_logo ? `<img src="${esc(m.league_logo)}" alt="">` : ""}<span>${esc(m.league)}</span></span>${pill}</div>
     <div class="teams">
@@ -535,14 +562,14 @@ function renderMatch(el, m, bets, myBet, isToday = false) {
       <div class="team">${m.away_logo ? `<img src="${esc(m.away_logo)}" alt="">` : ""}<span class="nm">${esc(m.away)}</span>${formHtml(m.away_form)}</div>
     </div>
     <div class="picks">${(m.fav === "1" ? ["F", "U"] : ["U", "F"]).map(k => `
-      <button class="pick${win === k ? " result" : ""}" type="button" data-k="${k}" aria-pressed="${mine === k}" ${ph !== "open" || !isToday ? "disabled" : ""}>
+      <button class="pick${win === k ? " result" : ""}" type="button" data-k="${k}" aria-pressed="${mine === k}" ${ph !== "open" || !bettable ? "disabled" : ""}>
         <span class="k">${esc(O[k].team)}</span><span class="lbl">${O[k].what}</span>
         <span class="odd num">${O[k].odd.toFixed(2)}</span>
         <span class="pts num">${Math.round(O[k].odd * 100) / 10} pts</span>
         ${showDist ? `<span class="bar"><i style="width:${Math.round(cnt[k] / total * 100)}%"></i></span>` : ""}
       </button>`).join("")}</div>
     <div class="hint" id="hint" aria-live="polite">${hintHtml(m, myBet)}</div>`;
-  if (isToday) el.querySelectorAll(".pick").forEach(b => b.onclick = () => placeBet(b.dataset.k));
+  if (bettable) el.querySelectorAll(".pick").forEach(b => b.onclick = () => placeBet(b.dataset.k, date));
 }
 function hintHtml(m, myBet) {
   const ph = phase(m), mine = myBet?.pick, mt = mine ? esc(opts(m)[mine]?.text || mine) : "";
@@ -570,7 +597,7 @@ function renderVote(el, date) {
     return;
   }
   el.innerHTML = `
-    <p class="vote-intro">Escolhe o jogo de <b>${esc(day)}</b>. O mais votado passa a ser o jogo do dia, e a votação fecha às 6h desse dia.</p>
+    <p class="vote-intro">Escolhe o jogo de <b>${esc(day)}</b>. O mais votado passa a ser o jogo desse dia. A votação fecha às 6h de ${esc(dayName(addDays(date, -BET_DAYS)).split(",")[0])}, 3 dias antes, e a partir daí já podes apostar.</p>
     <div class="vlist" role="list">${list.map(c => {
       const n = v.counts[c.ext_key] || 0, mine = v.mine === c.ext_key;
       const pct = v.total ? Math.round(n / v.total * 100) : 0;
@@ -599,8 +626,8 @@ async function castVote(date, fid) {
 
 function renderVoters(ph, m, bets) {
   const card = $("votersCard"), total = bets.length;
-  const isToday = m === state.match;
-  $("votersTitle").textContent = isToday ? "Apostas de hoje" : "Apostas do último jogo";
+  const isToday = m === state.match, isLast = m === state.last?.match;
+  $("votersTitle").textContent = isToday ? "Apostas de hoje" : isLast ? "Apostas do último jogo" : `Apostas de ${dayName(m.match_date).split(",")[0]}`;
   if (ph === "open") {
     card.hidden = total === 0;
     $("votersCount").textContent = "";
@@ -612,20 +639,23 @@ function renderVoters(ph, m, bets) {
   $("voters").innerHTML = bets.map(b => `<span${b.points > 0 ? ' class="won"' : ""}><b>${esc(opts(m)[b.pick]?.team || "?")}${b.pick === "U" ? " ou empate" : ""}</b>${esc(b.profiles?.display_name || "?")}${b.points > 0 ? ` +${Number(b.points).toLocaleString("pt-PT")}` : ""}</span>`).join("");
 }
 
-async function placeBet(k) {
-  const m = state.match; if (!m || phase(m) !== "open") return;
-  const prev = state.myBet ? { ...state.myBet } : null;
+async function placeBet(k, date = null) {
+  const e = date ? state.ahead[date] : null;
+  const m = e ? e.match : state.match; if (!m || phase(m) !== "open") return;
+  const cur = e ? e.mine : state.myBet;
+  const prev = cur ? { ...cur } : null;
   if (prev?.pick === k) return;
-  state.myBet = { ...(prev || { user_id: state.user.id }), pick: k };
-  if (!prev) state.allBets.push(state.myBet); else state.allBets = state.allBets.map(b => b.user_id === state.user.id ? state.myBet : b);
+  const nb = { ...(prev || { user_id: state.user.id }), pick: k };
+  if (e) { e.mine = nb; e.bets = prev ? e.bets.map(b => b.user_id === state.user.id ? nb : b) : [...e.bets, nb]; }
+  else { state.myBet = nb; if (!prev) state.allBets.push(nb); else state.allBets = state.allBets.map(b => b.user_id === state.user.id ? nb : b); }
   renderBoard();
   const { error } = prev
     ? await sb.from("bets").update({ pick: k, updated_at: new Date().toISOString() }).eq("match_id", m.id).eq("user_id", state.user.id)
     : await sb.from("bets").insert({ match_id: m.id, pick: k });
   if (error) {
-    await loadMatch(); renderBoard();
+    await Promise.all([loadMatch(), loadDeck()]); renderBoard();
     const h = $("hint"); if (h) h.textContent = new Date(m.kickoff) <= new Date() ? "O jogo já começou, as apostas fecharam." : "Não foi possível guardar. Tenta outra vez.";
-  } else { state.bettors.add(state.user.id); loadHist(); loadRank(); }
+  } else { if (!e) state.bettors.add(state.user.id); loadHist(); loadRank(); }
 }
 
 async function adminPick() {
